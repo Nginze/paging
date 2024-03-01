@@ -26,7 +26,7 @@
 #define TLB_SIZE 16                                             // size of the TLB (cache)
 #define MAX_ADDR_LEN 10                                         // buffer len for random addresses (32 bit)
 #define PAGE_READ_SIZE 256                                      // buffer for reading page binaries from disk file
-#define NUM_OF_SIMULATED_PROCESSES 10                           // number of processes to simulate
+#define NUM_OF_SIMULATED_PROCESSES 2                            // number of processes to simulate
 
 // Simulation vars and structures
 vmTable_t *tlbTable;      // translation lookup buffer for caching
@@ -55,10 +55,12 @@ FILE *address_file;
 FILE *backing_store;
 
 // CLI & Menu vars and structures
-char algo_choice;     // LRU or FIFO policy
-char access_pattern;  // Random Access or Sequential or Repeated or Locality of Reference
-char display_choice;  // option to log translation at every instance
-int translationCount; // translation count for statistics
+char algo_choice;               // LRU or FIFO policy
+char access_pattern;            // Random Access or Sequential or Repeated or Locality of Reference
+char display_choice;            // option to log translation at every instance
+int num_of_simulated_processes; // number of processes to simulate
+int translationCount;           // translation count for statistics
+int totalMemoryUsed;            // total memory used for statistics
 
 clock_t start, end;        // start and end time
 double cpu_time_used;      // execution time
@@ -88,6 +90,7 @@ int main(int argc, char *argv[])
     // prep useful statistics
     char *algoName;
     translationCount = 0;
+    num_of_simulated_processes = NUM_OF_SIMULATED_PROCESSES;
 
     // ensure input address file with random addresses is passed
     if (argc != 2)
@@ -135,6 +138,12 @@ int main(int argc, char *argv[])
         scanf("\n%c", &access_pattern);
     } while (access_pattern != '1' && access_pattern != '2' && access_pattern != '3' && access_pattern != '4');
 
+    do
+    {
+        printf("\033[1;34mEnter the number of processes to simulate (workload) [Min: 1, Max: 10]: \033[0m");
+        scanf("\n%d", &num_of_simulated_processes);
+    } while (num_of_simulated_processes < 1 || num_of_simulated_processes > 10);
+
     simulateProcessQueue();
 
     // Determining stdout algo name for Menu
@@ -148,16 +157,18 @@ int main(int argc, char *argv[])
     }
 
     printf("\033[1;36m\n-----------------------------------------------------------------------------------\n\033[0m");
-    printf("\033[1;33m\nResults Using %s Algorithm: \n\033[0m", algoName);
+    printf("\033[1;33m\nResults Using %s Replacement Algorithm: \n\033[0m", algoName);
     printf("\033[1;32mNumber of translated addresses = %d\n\033[0m", translationCount);
     double pfRate = (double)pageTable->pageFaultCount / (double)translationCount;
     double TLBRate = (double)tlbTable->tlbHitCount / (double)translationCount;
+    double avgMemoryUsage = (double)totalMemoryUsed / (double)translationCount;
 
     printf("\033[1;31mPage Faults = %d\n\033[0m", pageTable->pageFaultCount);
     printf("\033[1;31mPage Fault Rate = %.3f %%\n\033[0m", pfRate * 100);
     printf("\033[1;32mTLB Hits = %d\n\033[0m", tlbTable->tlbHitCount);
     printf("\033[1;32mTLB Hit Rate = %.3f %%\n\033[0m", TLBRate * 100);
     printf("\033[1;34mAverage time spent retrieving data from disk: %.3f millisec\n\033[0m", getAvgTimeInBackingStore());
+    printf("\033[1;34mAverage memory usage: %.3f Bytes\n\033[0m", avgMemoryUsage);
     printf("\033[1;36m\n-----------------------------------------------------------------------------------\n\033[0m");
 
     // close the address file and disk file
@@ -213,6 +224,7 @@ void translateAddress()
             cpu_time_used += (double)(clock() - start) / CLOCKS_PER_SEC;
             functionCallCount++;
             frame_number = nextFrame - 1;
+            totalMemoryUsed += FRAME_SIZE; // Increment the total memory used
         }
     }
 
@@ -478,33 +490,14 @@ void translateAddressForProcess(Process *process, int addressIndex)
 void simulateProcessQueue()
 {
     // Create and assign addresses to each process
-    Process *processQueue[NUM_OF_SIMULATED_PROCESSES];
-    for (int i = 0; i < NUM_OF_SIMULATED_PROCESSES; i++)
+    Process *processQueue[num_of_simulated_processes];
+    for (int i = 0; i < num_of_simulated_processes; i++)
     {
-        processQueue[i] = createProcess(i, PAGE_READ_SIZE); // Assuming each process has PAGE_READ_SIZE addresses
+        processQueue[i] = createProcess(i, PAGE_READ_SIZE); // Assuming each process has X amount of addresses
         assignAddresses(processQueue[i]);
     }
 
-    // Translate addresses for each process
-    // for (int i = 0; i < NUM_OF_SIMULATED_PROCESSES; i++)
-    // {
-    //     printf("\n\033[1;35m==================== Simulating Translation For Process %d ====================\033[0m\n", processQueue[i]->process_id);
-
-    //     for (int j = 0; j < processQueue[i]->num_addresses; j++)
-    //     {
-    //         virtual_addr = processQueue[i]->addresses[j];
-
-    //         // 32-bit masking function to extract page number
-    //         page_number = getPageNumber(PAGE_TABLE_MASK, virtual_addr, SHIFT);
-
-    //         // 32-bit masking function to extract page offset
-    //         offset_number = getOffset(OFFSET_MASK, virtual_addr);
-
-    //         translateAddress();
-    //         translationCount++;
-    //     }
-    // }
-    for (int i = 0; i < NUM_OF_SIMULATED_PROCESSES; i++)
+    for (int i = 0; i < num_of_simulated_processes; i++)
     {
         printf("\n\033[1;35m==================== Simulating Translation For Process %d ====================\033[0m\n", processQueue[i]->process_id);
 
@@ -545,7 +538,7 @@ void simulateProcessQueue()
     }
 
     // Free memory allocated for processes
-    for (int i = 0; i < NUM_OF_SIMULATED_PROCESSES; i++)
+    for (int i = 0; i < num_of_simulated_processes; i++)
     {
         freeProcess(processQueue[i]);
     }
