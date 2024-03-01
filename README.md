@@ -1,7 +1,12 @@
-* Implement Linked List (to be used for LRU and fifo algos)
-* Implement Hashtable/map
+### @TODO: Implement main program
 
-* Implement Page table
-* Implement TLB 
-* Implement Multilevel Page tables
+* Initialize page table, TLB and physical memory (DRAM)
+* Find way to simulate processes accessing memory (allocating and deallocating memory)
+* Perform vpn translation to ppn
+* Use various page replacement algorithms (LRU and FIFO)
+* Use various TLB replacement algorithms (LRU and FIFO)
+* Report statistics
 
+* Once base works, Implement multilevel page table
+* Develop CLI program to interact with the system
+Process Queue ???
