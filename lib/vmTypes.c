@@ -93,15 +93,29 @@ int getOffset(int mask, int value)
     return value & mask;
 }
 
-
-Process_t *createProcess()
-{
-    Process_t *newProcess = (Process_t *)malloc(sizeof(Process_t));
-    newProcess->addressQueue = NULL;
-    return newProcess;
+// Function to create a process
+Process* createProcess(int process_id, int num_addresses) {
+    Process* process = (Process*)malloc(sizeof(Process));
+    if (process == NULL) {
+        fprintf(stderr, "Error: Memory allocation failed for process\n");
+        exit(EXIT_FAILURE);
+    }
+    process->process_id = process_id;
+    process->num_addresses = num_addresses;
+    process->addresses = (int*)malloc(num_addresses * sizeof(int));
+    if (process->addresses == NULL) {
+        fprintf(stderr, "Error: Memory allocation failed for process addresses\n");
+        exit(EXIT_FAILURE);
+    }
+    return process;
 }
 
-void addAddressToProcess(Process_t *process, int address)
-{
-    insertAtEnd(&(process->addressQueue), address);
+// Function to free memory allocated for a process
+void freeProcess(Process* process) {
+    free(process->addresses);
+    free(process);
 }
+
+
+
+

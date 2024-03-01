@@ -55,8 +55,10 @@ FILE *address_file;
 FILE *backing_store;
 
 // CLI & Menu vars and structures
-char algo_choice;    // LRU or FIFO policy
-char display_choice; // option to log translation at every instance
+char algo_choice;     // LRU or FIFO policy
+char access_pattern;  // Random Access or Sequential or Repeated or Locality of Reference
+char display_choice;  // option to log translation at every instance
+int translationCount; // translation count for statistics
 
 clock_t start, end;        // start and end time
 double cpu_time_used;      // execution time
@@ -71,8 +73,8 @@ int getOldestEntry(int tlbSize);
 double getAvgTimeInBackingStore();
 void writeStructToFile(const char *filename, const vmTable_t *table);
 void readStructFromFile(const char *filename, vmTable_t *table);
-void simulateProcessQueue(Process_t **processQueue, int numProcesses);
-void translateAddressForProcess(Process_t *process);
+void simulateProcessQueue();
+void assignAddresses(Process *process);
 
 int main(int argc, char *argv[])
 {
@@ -84,8 +86,8 @@ int main(int argc, char *argv[])
     // Process_t **processQueue = (Process_t **)malloc(NUM_OF_SIMULATED_PROCESSES * sizeof(Process_t *));
 
     // prep useful statistics
-    int translationCount = 0;
     char *algoName;
+    translationCount = 0;
 
     // ensure input address file with random addresses is passed
     if (argc != 2)
@@ -127,44 +129,13 @@ int main(int argc, char *argv[])
         scanf("\n%c", &algo_choice);
     } while (algo_choice != '1' && algo_choice != '2');
 
-    // // Create the processes
-    // for (int i = 0; i < NUM_OF_SIMULATED_PROCESSES; i++)
-    // {
-    //     processQueue[i] = createProcess(); // creates virtual process
-    // }
-
-    // // Add addresses to the processes
-    // for (int i = 0; i < 100; i++)
-    // {
-    //     int processIndex = rand() % NUM_OF_SIMULATED_PROCESSES;
-    //     addAddressToProcess(processQueue[processIndex], i);
-    // }
-
-    // Read through the input file and output each virtual address
-    while (fgets(addressReadBuffer, MAX_ADDR_LEN, address_file) != NULL)
+    do
     {
-        virtual_addr = atoi(addressReadBuffer); // converting from ascii to int
+        printf("\033[1;34mSelect a Process Translation Access  Pattern [1: Sequential, 2: Random, 3: Locality of Reference, 4: Repeated]: \033[0m");
+        scanf("\n%c", &access_pattern);
+    } while (access_pattern != '1' && access_pattern != '2' && access_pattern != '3' && access_pattern != '4');
 
-        // // Assign the address to a process randomly
-        // int processIndex = rand() % NUM_OF_SIMULATED_PROCESSES;
-        // addAddressToProcess(processQueue[processIndex], virtual_addr);
-
-        // 32-bit masking function to extract page number
-        page_directory_index = getPageNumber(PAGE_DIRECTORY_MASK, virtual_addr, PAGE_DIRECTORY_SHIFT);
-
-        // 32-bit masking function to extract page number
-        page_number = getPageNumber(PAGE_TABLE_MASK, virtual_addr, SHIFT);
-
-        // 32-bit masking function to extract page offset
-        offset_number = getOffset(OFFSET_MASK, virtual_addr);
-
-        // Get the physical address and translatedValue stored at that address
-        translateAddress(algo_choice);
-
-        translationCount++; // increment the number of translated addresses
-    }
-
-    // simulateProcessQueue(processQueue, NUM_OF_SIMULATED_PROCESSES);
+    simulateProcessQueue();
 
     // Determining stdout algo name for Menu
     if (algo_choice == '1')
@@ -257,8 +228,6 @@ void translateAddress()
 
     // finally grab data from dram using frame number and offset
     translatedValue = dram[frame_number][offset_number];
-
-    // FOR TESTING -- printf("\nFrame Number: %d; Offset: %d; ", frame_number, offset_number);
 
     // program option to log translations to console
     if (display_choice == 'y')
@@ -467,32 +436,117 @@ void readStructFromFile(const char *filename, vmTable_t *table)
     fclose(file);
 }
 
-void translateAddressForProcess(Process_t *process)
+void assignAddresses(Process *process)
 {
-    while (process->addressQueue != NULL)
+    FILE *address_file = fopen("./data/address_file.txt", "r"); // Open the address file for reading
+    if (address_file == NULL)
     {
-        int address = process->addressQueue->data;
-        deleteNode(&(process->addressQueue), address);
-
-        // 32-bit masking function to extract page number
-        page_directory_index = getPageNumber(PAGE_DIRECTORY_MASK, address, PAGE_DIRECTORY_SHIFT);
-
-        // 32-bit masking function to extract page number
-        page_number = getPageNumber(PAGE_TABLE_MASK, address, SHIFT);
-
-        // 32-bit masking function to extract page offset
-        offset_number = getOffset(OFFSET_MASK, address);
-        // Perform the address translation here
-        translateAddress();
-
-        process->addressQueue = process->addressQueue->next;
+        fprintf(stderr, "Error opening address file\n");
+        exit(EXIT_FAILURE);
     }
+
+    for (int i = 0; i < process->num_addresses; i++)
+    {
+        char addressReadBuffer[MAX_ADDR_LEN]; // Buffer to store the read address
+        if (fgets(addressReadBuffer, MAX_ADDR_LEN, address_file) == NULL)
+        {
+            fprintf(stderr, "Error reading address from file\n");
+            exit(EXIT_FAILURE);
+        }
+        process->addresses[i] = atoi(addressReadBuffer); // Convert the read string to an integer
+    }
+
+    fclose(address_file); // Close the file after reading
 }
 
-void simulateProcessQueue(Process_t **processQueue, int numProcesses)
+// Function to translate an address for a process
+void translateAddressForProcess(Process *process, int addressIndex)
 {
-    for (int i = 0; i < numProcesses; i++)
+    virtual_addr = process->addresses[addressIndex];
+
+    // 32-bit masking function to extract page number
+    page_number = getPageNumber(PAGE_TABLE_MASK, virtual_addr, SHIFT);
+
+    // 32-bit masking function to extract page offset
+    offset_number = getOffset(OFFSET_MASK, virtual_addr);
+
+    translateAddress();
+    translationCount++;
+}
+
+// Function to simulate a process queue
+void simulateProcessQueue()
+{
+    // Create and assign addresses to each process
+    Process *processQueue[NUM_OF_SIMULATED_PROCESSES];
+    for (int i = 0; i < NUM_OF_SIMULATED_PROCESSES; i++)
     {
-        translateAddressForProcess(processQueue[i]);
+        processQueue[i] = createProcess(i, PAGE_READ_SIZE); // Assuming each process has PAGE_READ_SIZE addresses
+        assignAddresses(processQueue[i]);
+    }
+
+    // Translate addresses for each process
+    // for (int i = 0; i < NUM_OF_SIMULATED_PROCESSES; i++)
+    // {
+    //     printf("\n\033[1;35m==================== Simulating Translation For Process %d ====================\033[0m\n", processQueue[i]->process_id);
+
+    //     for (int j = 0; j < processQueue[i]->num_addresses; j++)
+    //     {
+    //         virtual_addr = processQueue[i]->addresses[j];
+
+    //         // 32-bit masking function to extract page number
+    //         page_number = getPageNumber(PAGE_TABLE_MASK, virtual_addr, SHIFT);
+
+    //         // 32-bit masking function to extract page offset
+    //         offset_number = getOffset(OFFSET_MASK, virtual_addr);
+
+    //         translateAddress();
+    //         translationCount++;
+    //     }
+    // }
+    for (int i = 0; i < NUM_OF_SIMULATED_PROCESSES; i++)
+    {
+        printf("\n\033[1;35m==================== Simulating Translation For Process %d ====================\033[0m\n", processQueue[i]->process_id);
+
+        switch (access_pattern)
+        {
+        case '1': // Sequential Access
+            for (int j = 0; j < processQueue[i]->num_addresses; j++)
+            {
+                translateAddressForProcess(processQueue[i], j);
+            }
+            break;
+        case '2': // Random Access
+            for (int j = 0; j < processQueue[i]->num_addresses; j++)
+            {
+                int randomIndex = rand() % processQueue[i]->num_addresses;
+                translateAddressForProcess(processQueue[i], randomIndex);
+            }
+            break;
+        case '3': // Locality of Reference
+            int rangeStart = rand() % processQueue[i]->num_addresses;
+            int rangeSize = 10; // or some other number
+            for (int j = 0; j < rangeSize; j++)
+            {
+                translateAddressForProcess(processQueue[i], (rangeStart + j) % processQueue[i]->num_addresses);
+            }
+            break;
+        case '4': // Repeated Access
+            int hotAddressIndex = rand() % processQueue[i]->num_addresses;
+            for (int j = 0; j < 10; j++) // or some other number
+            {
+                translateAddressForProcess(processQueue[i], hotAddressIndex);
+            }
+            break;
+        default:
+            fprintf(stderr, "Invalid access pattern\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // Free memory allocated for processes
+    for (int i = 0; i < NUM_OF_SIMULATED_PROCESSES; i++)
+    {
+        freeProcess(processQueue[i]);
     }
 }
