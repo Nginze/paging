@@ -26,13 +26,13 @@
 #define TLB_SIZE 16                                             // size of the TLB (cache)
 #define MAX_ADDR_LEN 10                                         // buffer len for random addresses (32 bit)
 #define PAGE_READ_SIZE 256                                      // buffer for reading page binaries from disk file
-#define NUM_OF_SIMULATED_PROCESSES 2                            // number of processes to simulate
+#define NUM_OF_SIMULATED_PROCESSES 2                            // default number of processes to simulate
 
 // Simulation vars and structures
-vmTable_t *tlbTable;      // translation lookup buffer for caching
-vmTable_t *pageDirectory; // page directory (1st level page table)
-vmTable_t *pageTable;     // page directory (1st level page table)
-int **dram;               // dynamic random access memory (physical memory)
+vmTable_t *tlbTable;            // translation lookup buffer for caching
+pageDirectory_t *pageDirectory; // page directory (1st level page table)
+vmTable_t *pageTable;           // page table (2nd level page table)
+int **dram;                     // dynamic random access memory (physical memory)
 
 // read buffers for address and disk access
 char addressReadBuffer[MAX_ADDR_LEN];
@@ -67,22 +67,26 @@ double cpu_time_used;      // execution time
 int functionCallCount = 0; // number of function calls made
 
 // hoist function prototypes
-void translateAddress();
-void readFromStore(int pageNumber);
-void tlbFIFOinsert(int pageNumber, int frameNumber);
-void tlbLRUinsert(int pageNumber, int frameNumber);
-int getOldestEntry(int tlbSize);
-double getAvgTimeInBackingStore();
-void writeStructToFile(const char *filename, const vmTable_t *table);
-void readStructFromFile(const char *filename, vmTable_t *table);
-void simulateProcessQueue();
-void assignAddresses(Process *process);
+void translateAddress();                                              // translate virtual address to physical address
+void readFromStore(int pageNumber);                                   // read page from disk and load into physical memory
+void tlbFIFOinsert(int pageNumber, int frameNumber);                  // insert into TLB using FIFO policy
+void tlbLRUinsert(int pageNumber, int frameNumber);                   // insert into TLB using LRU policy
+int getOldestEntry(int tlbSize);                                      // get the oldest entry in TLB
+double getAvgTimeInBackingStore();                                    // get average time spent retrieving data from disk
+void writeStructToFile(const char *filename, const vmTable_t *table); // write VM table to file
+void readStructFromFile(const char *filename, vmTable_t *table);      // read VM table from file
+void simulateProcessQueue();                                          // simulate process queue
+void assignAddresses(Process *process);                               // assign addresses to a process
+vmTable_t *readPageTableFromFile(int directory_index);                // read page table from file
+void initializePageTableForProcess(int process_id, int length);       // initialize page table for a process
+void savePageTableToFile(int directory_index);
+int getTotalPageFaultCount();
 
 int main(int argc, char *argv[])
 {
     // initialize cache, page tables and physical memory
     tlbTable = createVmTable(TLB_SIZE);
-    pageDirectory = createVmTable(PAGE_TABLE_SIZE);
+    pageDirectory = createPageDirectory(PAGE_TABLE_SIZE);
     pageTable = createVmTable(PAGE_TABLE_SIZE);
     dram = createDRAM(TOTAL_FRAME_COUNT, FRAME_SIZE);
     // Process_t **processQueue = (Process_t **)malloc(NUM_OF_SIMULATED_PROCESSES * sizeof(Process_t *));
@@ -159,11 +163,11 @@ int main(int argc, char *argv[])
     printf("\033[1;36m\n-----------------------------------------------------------------------------------\n\033[0m");
     printf("\033[1;33m\nResults Using %s Replacement Algorithm: \n\033[0m", algoName);
     printf("\033[1;32mNumber of translated addresses = %d\n\033[0m", translationCount);
-    double pfRate = (double)pageTable->pageFaultCount / (double)translationCount;
+    double pfRate = (double)getTotalPageFaultCount() / (double)translationCount;
     double TLBRate = (double)tlbTable->tlbHitCount / (double)translationCount;
     double avgMemoryUsage = (double)totalMemoryUsed / (double)translationCount;
 
-    printf("\033[1;31mPage Faults = %d\n\033[0m", pageTable->pageFaultCount);
+    printf("\033[1;31mPage Faults = %d\n\033[0m", getTotalPageFaultCount());
     printf("\033[1;31mPage Fault Rate = %.3f %%\n\033[0m", pfRate * 100);
     printf("\033[1;32mTLB Hits = %d\n\033[0m", tlbTable->tlbHitCount);
     printf("\033[1;32mTLB Hit Rate = %.3f %%\n\033[0m", TLBRate * 100);
@@ -198,27 +202,33 @@ void translateAddress()
         }
     }
 
-    // tlb miss has occured so we need to check the page table
     if (frame_number == -1)
     {
         tlbTable->tlbMissCount++;
 
-        // go through page table
-        for (int i = 0; i < nextPage; i++)
+        // Check if the second-level page table exists
+        if (pageDirectory->pageTableArr[page_directory_index] == NULL)
+        {
+            // Create a new page table for the process
+            initializePageTableForProcess(page_directory_index, PAGE_TABLE_SIZE);
+        }
+
+        // Go through page table
+        for (int i = 0; i < pageDirectory->pageTableArr[page_directory_index]->length; i++)
         {
             // If the page is found in those contents
-            if (pageTable->pageNumArr[i] == page_number)
+            if (pageDirectory->pageTableArr[page_directory_index]->pageNumArr[i] == page_number)
             {
-                frame_number = pageTable->frameNumArr[i];
+                frame_number = pageDirectory->pageTableArr[page_directory_index]->frameNumArr[i];
                 break;
             }
         }
 
-        // page fault has occured so we need to read page contents from disk (binary file in data directory)
+        // Page fault has occured so we need to read page contents from disk (binary file in data directory)
         if (frame_number == -1)
         {
-            // read page from disk and load into physical memory (clock how long operation took)
-            pageTable->pageFaultCount++;
+            // Read page from disk and load into physical memory (clock how long operation took)
+            pageDirectory->pageTableArr[page_directory_index]->pageFaultCount++;
             start = clock();
             readFromStore(page_number);
             cpu_time_used += (double)(clock() - start) / CLOCKS_PER_SEC;
@@ -227,6 +237,36 @@ void translateAddress()
             totalMemoryUsed += FRAME_SIZE; // Increment the total memory used
         }
     }
+
+    // // tlb miss has occured so we need to check the page table
+    // if (frame_number == -1)
+    // {
+    //     tlbTable->tlbMissCount++;
+
+    //     // go through page table
+    //     for (int i = 0; i < nextPage; i++)
+    //     {
+    //         // If the page is found in those contents
+    //         if (pageTable->pageNumArr[i] == page_number)
+    //         {
+    //             frame_number = pageTable->frameNumArr[i];
+    //             break;
+    //         }
+    //     }
+
+    //     // page fault has occured so we need to read page contents from disk (binary file in data directory)
+    //     if (frame_number == -1)
+    //     {
+    //         // read page from disk and load into physical memory (clock how long operation took)
+    //         pageTable->pageFaultCount++;
+    //         start = clock();
+    //         readFromStore(page_number);
+    //         cpu_time_used += (double)(clock() - start) / CLOCKS_PER_SEC;
+    //         functionCallCount++;
+    //         frame_number = nextFrame - 1;
+    //         totalMemoryUsed += FRAME_SIZE; // Increment the total memory used
+    //     }
+    // }
 
     // update tlb and pagetables using selected eviction policy at menu start
     if (algo_choice == '1')
@@ -269,8 +309,8 @@ void readFromStore(int pageNumber)
     }
 
     // update the page table with the new page number and frame number
-    pageTable->pageNumArr[nextPage] = pageNumber;
-    pageTable->frameNumArr[nextPage] = nextFrame;
+    pageDirectory->pageTableArr[page_directory_index]->pageNumArr[page_number] = pageNumber;
+    pageDirectory->pageTableArr[page_directory_index]->frameNumArr[page_number] = nextFrame;
 
     // increment the counters that track the next available frames
     nextFrame++;
@@ -450,7 +490,7 @@ void readStructFromFile(const char *filename, vmTable_t *table)
 
 void assignAddresses(Process *process)
 {
-    FILE *address_file = fopen("./data/address_file.txt", "r"); // Open the address file for reading
+    FILE *address_file = fopen("./data/address_file.txt", "r"); // open the address file for reading
     if (address_file == NULL)
     {
         fprintf(stderr, "Error opening address file\n");
@@ -459,22 +499,24 @@ void assignAddresses(Process *process)
 
     for (int i = 0; i < process->num_addresses; i++)
     {
-        char addressReadBuffer[MAX_ADDR_LEN]; // Buffer to store the read address
+        char addressReadBuffer[MAX_ADDR_LEN]; // buffer to store the read address
         if (fgets(addressReadBuffer, MAX_ADDR_LEN, address_file) == NULL)
         {
             fprintf(stderr, "Error reading address from file\n");
             exit(EXIT_FAILURE);
         }
-        process->addresses[i] = atoi(addressReadBuffer); // Convert the read string to an integer
+        process->addresses[i] = atoi(addressReadBuffer); // convert the read string to an integer
     }
 
-    fclose(address_file); // Close the file after reading
+    fclose(address_file); // close the file after reading
 }
 
-// Function to translate an address for a process
 void translateAddressForProcess(Process *process, int addressIndex)
 {
     virtual_addr = process->addresses[addressIndex];
+
+    // 32-bit masking function to extract page directory index
+    page_directory_index = getPageNumber(PAGE_DIRECTORY_MASK, virtual_addr, PAGE_DIRECTORY_SHIFT);
 
     // 32-bit masking function to extract page number
     page_number = getPageNumber(PAGE_TABLE_MASK, virtual_addr, SHIFT);
@@ -486,10 +528,9 @@ void translateAddressForProcess(Process *process, int addressIndex)
     translationCount++;
 }
 
-// Function to simulate a process queue
 void simulateProcessQueue()
 {
-    // Create and assign addresses to each process
+    // create and assign addresses to each process
     Process *processQueue[num_of_simulated_processes];
     for (int i = 0; i < num_of_simulated_processes; i++)
     {
@@ -537,9 +578,141 @@ void simulateProcessQueue()
         }
     }
 
-    // Free memory allocated for processes
+    // free memory allocated for processes
     for (int i = 0; i < num_of_simulated_processes; i++)
     {
         freeProcess(processQueue[i]);
     }
+}
+
+vmTable_t *readPageTableFromFile(int directory_index)
+{
+    // Open the file
+    char filename[64];
+    sprintf(filename, "./data/page_table_%d.bin", directory_index);
+    FILE *file = fopen(filename, "rb");
+    if (file == NULL)
+    {
+        fprintf(stderr, "Error opening file %s\n", filename);
+        exit(-1);
+    }
+
+    // Read the length of the page table
+    int length;
+    if (fread(&length, sizeof(int), 1, file) != 1)
+    {
+        fprintf(stderr, "Error reading length from file %s\n", filename);
+        exit(-1);
+    }
+
+    // Create a new vmTable_t
+    vmTable_t *table = createVmTable(length);
+
+    // Read the page numbers and frame numbers
+    if (fread(table->pageNumArr, sizeof(int), length, file) != length ||
+        fread(table->frameNumArr, sizeof(int), length, file) != length)
+    {
+        fprintf(stderr, "Error reading from file %s\n", filename);
+        exit(-1);
+    }
+
+    // Close the file
+    fclose(file);
+
+    return table;
+}
+
+void initializePageTableForProcess(int process_id, int length)
+{
+    // Create a new page table for the process
+    vmTable_t *table = createVmTable(length);
+
+    // Initialize the page table
+    for (int i = 0; i < length; i++)
+    {
+        table->pageNumArr[i] = i;   // For simplicity, let's assume that page numbers are consecutive integers
+        table->frameNumArr[i] = -1; // Initially, all pages are not in memory
+    }
+
+    // Add the page table to the page directory
+    pageDirectory->pageTableArr[process_id] = table;
+
+    // Save the page table to a file
+    char filename[64];
+    sprintf(filename, "./data/page_table_%d.bin", process_id);
+    FILE *file = fopen(filename, "wb");
+    if (file == NULL)
+    {
+        fprintf(stderr, "Error opening file %s\n", filename);
+        exit(-1);
+    }
+
+    // Write the length of the page table
+    if (fwrite(&length, sizeof(int), 1, file) != 1)
+    {
+        fprintf(stderr, "Error writing length to file %s\n", filename);
+        exit(-1);
+    }
+
+    // Write the page numbers and frame numbers
+    if (fwrite(table->pageNumArr, sizeof(int), length, file) != length ||
+        fwrite(table->frameNumArr, sizeof(int), length, file) != length)
+    {
+        fprintf(stderr, "Error writing to file %s\n", filename);
+        exit(-1);
+    }
+
+    // Close the file
+    fclose(file);
+}
+
+void savePageTableToFile(int directory_index)
+{
+    // Open the file
+    char filename[64];
+    sprintf(filename, "./data/page_table_%d.bin", directory_index);
+    FILE *file = fopen(filename, "wb");
+    if (file == NULL)
+    {
+        fprintf(stderr, "Error opening file %s\n", filename);
+        exit(-1);
+    }
+
+    // Get the page table
+    vmTable_t *table = pageDirectory->pageTableArr[directory_index];
+
+    // Write the length of the page table
+    if (fwrite(&table->length, sizeof(int), 1, file) != 1)
+    {
+        fprintf(stderr, "Error writing length to file %s\n", filename);
+        exit(-1);
+    }
+
+    // Write the page numbers and frame numbers
+    if (fwrite(table->pageNumArr, sizeof(int), table->length, file) != table->length ||
+        fwrite(table->frameNumArr, sizeof(int), table->length, file) != table->length)
+    {
+        fprintf(stderr, "Error writing to file %s\n", filename);
+        exit(-1);
+    }
+
+    // Close the file
+    fclose(file);
+}
+
+int getTotalPageFaultCount()
+{
+    int totalPageFaultCount = 0;
+
+    // Go through all page tables in the directory
+    for (int i = 0; i < PAGE_TABLE_SIZE; i++)
+    {
+        if (pageDirectory->pageTableArr[i] != NULL)
+        {
+            // Add the pageFaultCount of the current page table to the total
+            totalPageFaultCount += pageDirectory->pageTableArr[i]->pageFaultCount;
+        }
+    }
+
+    return totalPageFaultCount;
 }

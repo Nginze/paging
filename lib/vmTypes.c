@@ -93,29 +93,49 @@ int getOffset(int mask, int value)
     return value & mask;
 }
 
-// Function to create a process
-Process* createProcess(int process_id, int num_addresses) {
-    Process* process = (Process*)malloc(sizeof(Process));
-    if (process == NULL) {
+Process *createProcess(int process_id, int num_addresses)
+{
+    Process *process = (Process *)malloc(sizeof(Process));
+    if (process == NULL)
+    {
         fprintf(stderr, "Error: Memory allocation failed for process\n");
         exit(EXIT_FAILURE);
     }
     process->process_id = process_id;
     process->num_addresses = num_addresses;
-    process->addresses = (int*)malloc(num_addresses * sizeof(int));
-    if (process->addresses == NULL) {
+    process->addresses = (int *)malloc(num_addresses * sizeof(int));
+    if (process->addresses == NULL)
+    {
         fprintf(stderr, "Error: Memory allocation failed for process addresses\n");
         exit(EXIT_FAILURE);
     }
     return process;
 }
 
-// Function to free memory allocated for a process
-void freeProcess(Process* process) {
+void freeProcess(Process *process)
+{
     free(process->addresses);
     free(process);
 }
 
+pageDirectory_t *createPageDirectory(int length)
+{
+    pageDirectory_t *new_directory = malloc(sizeof(pageDirectory_t));
+    new_directory->length = length;
+    new_directory->pageTableArr = malloc(sizeof(vmTable_t *) * length);
 
+    // If there is not enough memory on the heap to make a call to malloc() // Notify and Exit
+    if (new_directory == NULL || new_directory->pageTableArr == NULL)
+    {
+        printf("Error - Could not allocate a new Page Directory!\r\n");
+        exit(-1);
+    }
 
+    // Initialize all pointers to NULL
+    for (int i = 0; i < length; i++)
+    {
+        new_directory->pageTableArr[i] = NULL;
+    }
 
+    return new_directory;
+}
