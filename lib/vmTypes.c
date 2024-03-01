@@ -92,3 +92,16 @@ int getOffset(int mask, int value)
 {
     return value & mask;
 }
+
+
+Process_t *createProcess()
+{
+    Process_t *newProcess = (Process_t *)malloc(sizeof(Process_t));
+    newProcess->addressQueue = NULL;
+    return newProcess;
+}
+
+void addAddressToProcess(Process_t *process, int address)
+{
+    insertAtEnd(&(process->addressQueue), address);
+}

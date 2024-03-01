@@ -18,6 +18,10 @@ typedef struct
     int tlbMissCount;
 } vmTable_t;
 
+typedef struct Process
+{
+    node_t *addressQueue;
+} Process_t;
 typedef struct
 {
     int frame_number;
@@ -46,5 +50,9 @@ int getPageNumber(int mask, int value, int shift);
 
 // function to get offset from virtual address
 int getOffset(int mask, int value);
+
+Process_t *createProcess();
+
+void addAddressToProcess(Process_t *process, int address);
 
 #endif // VM_TYPES_H_
