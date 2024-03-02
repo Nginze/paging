@@ -13,7 +13,11 @@ typedef struct Node
     struct Node *prev;
 } node_t;
 
-typedef enum { false = 0, true = !false } bool;
+typedef enum
+{
+    false = 0,
+    true = !false
+} bool;
 
 // function to create a new node
 node_t *createNode(int data);
@@ -35,6 +39,9 @@ void printList(node_t *head);
 
 // ------------------------------------ Hash Table ------------------------------------------
 
+/*
+    Custom type definition for key-value pair
+*/
 typedef struct KeyValuePair
 {
     char *key;
@@ -42,6 +49,9 @@ typedef struct KeyValuePair
     struct KeyValuePair *next;
 } kv_t;
 
+/*
+    Custom type definition for hash map
+*/
 typedef struct HashMap
 {
     int size;

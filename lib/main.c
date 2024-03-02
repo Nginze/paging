@@ -10,6 +10,7 @@
     Date:           1 March 2024
     Course:         Operating Systems
     Assignment:     Midsemester Project
+    Group:          3
 */
 
 #define VIRTUAL_ADDRESS_SPACE (1 << 16)                         // 2^16 KB
@@ -79,8 +80,8 @@ void simulateProcessQueue();                                          // simulat
 void assignAddresses(Process *process);                               // assign addresses to a process
 vmTable_t *readPageTableFromFile(int directory_index);                // read page table from file
 void initializePageTableForProcess(int process_id, int length);       // initialize page table for a process
-void savePageTableToFile(int directory_index);
-int getTotalPageFaultCount();
+void savePageTableToFile(int directory_index);                        // save page table to file (disk)
+int getTotalPageFaultCount();                                         // get total page fault count from 2nd level page tables
 
 int main(int argc, char *argv[])
 {
@@ -89,7 +90,6 @@ int main(int argc, char *argv[])
     pageDirectory = createPageDirectory(PAGE_TABLE_SIZE);
     pageTable = createVmTable(PAGE_TABLE_SIZE);
     dram = createDRAM(TOTAL_FRAME_COUNT, FRAME_SIZE);
-    // Process_t **processQueue = (Process_t **)malloc(NUM_OF_SIMULATED_PROCESSES * sizeof(Process_t *));
 
     // prep useful statistics
     char *algoName;
@@ -121,6 +121,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    // cli application sequence to set options for simulation
     printf("\033[1;33m\nWelcome to The OS Paginator\033[0m");
     printf("\033[1;32m\nNumber of logical pages: %d\nPage size: %d Bytes\nPage Table Size: %d\nTLB Size: %d entries\nNumber of Physical Frames: %d\nPhysical Memory Size: %d Bytes\033[0m", PAGE_TABLE_SIZE, PAGE_READ_SIZE, PAGE_TABLE_SIZE, TLB_SIZE, FRAME_SIZE, PAGE_READ_SIZE * FRAME_SIZE);
 
@@ -148,9 +149,12 @@ int main(int argc, char *argv[])
         scanf("\n%d", &num_of_simulated_processes);
     } while (num_of_simulated_processes < 1 || num_of_simulated_processes > 10);
 
+    printf("\033[1;34m NB: [0 indicates DRAM  has not been initialized to a value]; Starting Sim ... : \033[0m");
+
+    // after setting options begin simulations on processes
     simulateProcessQueue();
 
-    // Determining stdout algo name for Menu
+    // determining stdout algo name for menu
     if (algo_choice == '1')
     {
         algoName = "FIFO";
@@ -160,9 +164,11 @@ int main(int argc, char *argv[])
         algoName = "LRU";
     }
 
+    // output statistics to console
     printf("\033[1;36m\n-----------------------------------------------------------------------------------\n\033[0m");
     printf("\033[1;33m\nResults Using %s Replacement Algorithm: \n\033[0m", algoName);
     printf("\033[1;32mNumber of translated addresses = %d\n\033[0m", translationCount);
+
     double pfRate = (double)getTotalPageFaultCount() / (double)translationCount;
     double TLBRate = (double)tlbTable->tlbHitCount / (double)translationCount;
     double avgMemoryUsage = (double)totalMemoryUsed / (double)translationCount;
@@ -187,6 +193,8 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+// Definitions to hoisted functions
+
 void translateAddress()
 {
     int frame_number = -1; // indicates frame hasn't been found
@@ -206,17 +214,17 @@ void translateAddress()
     {
         tlbTable->tlbMissCount++;
 
-        // Check if the second-level page table exists
+        // check if the second-level page table exists
         if (pageDirectory->pageTableArr[page_directory_index] == NULL)
         {
-            // Create a new page table for the process
+            // create a new page table for the process
             initializePageTableForProcess(page_directory_index, PAGE_TABLE_SIZE);
         }
 
-        // Go through page table
+        // go through page table
         for (int i = 0; i < pageDirectory->pageTableArr[page_directory_index]->length; i++)
         {
-            // If the page is found in those contents
+            // if the page is found in those contents
             if (pageDirectory->pageTableArr[page_directory_index]->pageNumArr[i] == page_number)
             {
                 frame_number = pageDirectory->pageTableArr[page_directory_index]->frameNumArr[i];
@@ -224,10 +232,10 @@ void translateAddress()
             }
         }
 
-        // Page fault has occured so we need to read page contents from disk (binary file in data directory)
+        // page fault has occured so we need to read page contents from disk (binary file in data directory)
         if (frame_number == -1)
         {
-            // Read page from disk and load into physical memory (clock how long operation took)
+            // read page from disk and load into physical memory (clock how long operation took)
             pageDirectory->pageTableArr[page_directory_index]->pageFaultCount++;
             start = clock();
             readFromStore(page_number);
@@ -237,36 +245,6 @@ void translateAddress()
             totalMemoryUsed += FRAME_SIZE; // Increment the total memory used
         }
     }
-
-    // // tlb miss has occured so we need to check the page table
-    // if (frame_number == -1)
-    // {
-    //     tlbTable->tlbMissCount++;
-
-    //     // go through page table
-    //     for (int i = 0; i < nextPage; i++)
-    //     {
-    //         // If the page is found in those contents
-    //         if (pageTable->pageNumArr[i] == page_number)
-    //         {
-    //             frame_number = pageTable->frameNumArr[i];
-    //             break;
-    //         }
-    //     }
-
-    //     // page fault has occured so we need to read page contents from disk (binary file in data directory)
-    //     if (frame_number == -1)
-    //     {
-    //         // read page from disk and load into physical memory (clock how long operation took)
-    //         pageTable->pageFaultCount++;
-    //         start = clock();
-    //         readFromStore(page_number);
-    //         cpu_time_used += (double)(clock() - start) / CLOCKS_PER_SEC;
-    //         functionCallCount++;
-    //         frame_number = nextFrame - 1;
-    //         totalMemoryUsed += FRAME_SIZE; // Increment the total memory used
-    //     }
-    // }
 
     // update tlb and pagetables using selected eviction policy at menu start
     if (algo_choice == '1')
@@ -284,7 +262,7 @@ void translateAddress()
     // program option to log translations to console
     if (display_choice == 'y')
     {
-        printf("\n\033[1;31mVirtual(16bit):\033[0m x0%d\t\t\033[1;32mPhysical(16bit):\033[0m x0%d\t\t\033[1;34mDRAM:\033[0m %d", virtual_addr, (frame_number << SHIFT) | offset_number, translatedValue);
+        printf("\n\033[1;31mVirtual(16bit):\033[0m x%10d\t\t\033[1;32mPhysical(16bit):\033[0m x%10d\t\t\033[1;34mDRAM:\033[0m %d", virtual_addr, (frame_number << SHIFT) | offset_number, translatedValue);
     }
 }
 

@@ -13,4 +13,5 @@ $(TARGET): $(SOURCES)
 
 # Clean rule
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) data/page_table_*
+
